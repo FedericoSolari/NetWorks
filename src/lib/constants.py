@@ -1,0 +1,34 @@
+import logging
+
+LOCAL_HOST = "10.0.0.1" #modularizar el host y port
+LOCAL_PORT = 5000
+
+BUFFER_SIZE = 1024
+MAX_TIMEOUT_RETRIES = 30
+
+EMPTY_FILE = 0
+EMPTY_DATA = b""
+
+TIMEOUT = 1.5
+
+WRITE_MODE = "wb"
+READ_MODE = "rb"
+
+STOP_AND_WAIT = "sw"
+SELECTIVE_REPEAT = "sr"
+
+HEADER_SIZE = 414
+DATA_SIZE = BUFFER_SIZE - HEADER_SIZE
+
+DOWNLOADS_DIR = "saved-files"
+
+ERROR_EXISTING_FILE = "This file already exists"
+
+MAX_WINDOW_SIZE = 10
+WINDOW_RECEIVER_SIZE = 20
+
+MAX_ACK_RESEND_TRIES = 10
+
+WRITE_MODE = "wb"
+
+LOG_LEVEL = logging.DEBUG
