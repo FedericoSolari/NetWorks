@@ -1,5 +1,5 @@
 import logging
-from lib.constants import EMPTY_FILE, EMPTY_DATA, BUFFER_SIZE#, MAX_TIMEOUT_RETRIES, TIMEOUT
+from lib.constants import EMPTY_FILE, EMPTY_DATA, BUFFER_SIZE, LOCAL_PORT, LOCAL_HOST#, MAX_TIMEOUT_RETRIES, TIMEOUT
 from lib.flags import START_SESSION, ACK, CLOSE, CLOSE_ACK, ERROR, LIST, START_SESSION_ACK, NO_FLAGS, Flag
 from lib.constants import LOCAL_HOST
 from lib.commands import Command
@@ -100,10 +100,10 @@ class Message:
                       file_name, EMPTY_DATA)
         return msg.encode()
 
-
-def send_ack(command, port, ack_number, socket):
+def send_ack(command, ack_number, socket, port=LOCAL_PORT, ip=LOCAL_HOST):
     try:
         ack_msg = Message.ack_msg(command, ack_number)
-        socket.sendto(ack_msg, (LOCAL_HOST, port))
+        socket.sendto(ack_msg, (ip, port))
+        logging.debug(f"[SERVER] Enviando ACK {ack_number} a {ip}:{port}")
     except Exception as e:
         logging.error(f"Error sending ACK: {e}")

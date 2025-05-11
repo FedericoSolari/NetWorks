@@ -3,7 +3,7 @@ import os
 from queue import Queue
 from socket import socket, AF_INET, SOCK_DGRAM, timeout
 from threading import Thread
-from lib.constants import BUFFER_SIZE, TIMEOUT, ERROR_EXISTING_FILE
+from lib.constants import BUFFER_SIZE, TIMEOUT, ERROR_EXISTING_FILE, MAX_TIMEOUT_RETRIES
 from threading import Lock
 from lib.message_handling import Message
 from lib.flags import START_SESSION, ACK, LIST
@@ -65,51 +65,53 @@ class Server:
                 except Exception as e:
                     logging.error(f"Error in thread {e}")
 
-    # Se completa el 3 way handshake: le masnda el ACK al cliente y espera q
-    # el cliente le conteste otro ACK
-    
     def send_and_wait_ack_from_client(self, client_address, msg_queue, decoded_msg):
         client_port = client_address[1]
         protocol_RDT = decoded_msg.data.decode()
 
+        # Preparamos el socket de transferencia y el protocolo
         transfer_socket = socket(AF_INET, SOCK_DGRAM)
-        #transfer_socket = self.socket
-        protocol = select_protocol(protocol_RDT)
-  
-        self.protocols_lock.acquire()
-        self.protocols[client_port] = protocol(transfer_socket)
-        self.protocols_lock.release()
-       
+        protocol_cls = select_protocol(protocol_RDT)
+        protocol = protocol_cls(transfer_socket)
+
+        # Guardamos la instancia de protocolo para este cliente
+        with self.protocols_lock:
+            self.protocols[client_port] = protocol
+
+        # Información de debug
         print("envio start session ack")
         print(f" en el server :flecha_en_curva_a_la_derecha: Destino: IP={client_address[0]}, Port={client_address[1]}")
         print(f" en el server :flecha_en_curva_a_la_derecha: Socket fileno: {transfer_socket.fileno()}")
         print(f" en el servidor + {transfer_socket.getsockname()}")
-            
-        start_session_ack = Message.start_session_ack_msg(decoded_msg.command)
-        transfer_socket.sendto(start_session_ack, client_address)
-        transfer_socket.sendto(start_session_ack, client_address)
-        transfer_socket.sendto(start_session_ack, client_address)
 
-        try:
-            encoded_message = transfer_socket.recvfrom(BUFFER_SIZE)[0]
-            decoded_msg = Message.decode(encoded_message)
-            print(f"Mensaje recibido del cliente: {decoded_msg}")
-            print(f"Flag recibido: {decoded_msg.flags} ({type(decoded_msg.flags)})")
-            #Server espera un ACK del cliente acrca del SEND_ACK que envio
-            if decoded_msg.flags == ACK:
-                self.start_file_transfer_operation(msg_queue,decoded_msg, client_address, transfer_socket)
-                print("fin operacion de file transfer") 
-            else:
-                logging.error("Flag inesperado, cerrando conexión")
-                self.close_client_connection(client_address)
-        except Exception as e:
-            del self.clients[client_port]
-            logging.error(f"Client {client_port}: {e}")
-            logging.error(
-                f"Client {client_port}: handshake timeout." +
-                " Closing connection."
-            )
-            raise e
+        start_session_ack = Message.start_session_ack_msg(decoded_msg.command)
+
+        # 1) Bucle de reintentos para enviar START_SESSION_ACK y esperar el ACK del cliente
+        tries = 0
+        while tries < MAX_TIMEOUT_RETRIES:
+            # Enviamos el ACK de sesión
+            transfer_socket.sendto(start_session_ack, client_address)
+
+            try:
+                # Esperamos la respuesta del cliente
+                data, _ = transfer_socket.recvfrom(BUFFER_SIZE)
+                resp = Message.decode(data)
+
+                if resp.flags == ACK:
+                    # Handshake completado: arrancamos la transferencia
+                    self.start_file_transfer_operation(msg_queue, resp, client_address, transfer_socket)
+                    print("fin operacion de file transfer")
+                    return
+                else:
+                    logging.warning(f"Handshake: recibí flag inesperado {resp.flags!r}, reintentando…")
+            except timeout:
+                tries += 1
+                logging.warning(f"Handshake SR: timeout esperando ACK ({tries}/{MAX_TIMEOUT_RETRIES}), reenviando START_SESSION_ACK")
+                continue
+
+        # 2) Si agotamos los reintentos sin recibir ACK, cerramos la conexión
+        logging.error(f"Handshake SR: no recibí ACK de sesión tras {MAX_TIMEOUT_RETRIES} intentos, cerrando conexión con {client_address}")
+        self.close_client_connection(client_address)
 
     def handle_client_message(self, encoded_msg, client_address, msg_queue):
         try:
@@ -165,40 +167,37 @@ class Server:
             self.close_client_connection(client_port)
     
     def handle_download(self, client_address, msg_queue, transfer_socket):
-        print(f"handle_download {client_address}")
-        client_port = client_address[1]
+        logging.debug(f"handle_download {client_address}")
+       
         encoded_client_message = transfer_socket.recvfrom(BUFFER_SIZE)[0]
         decoded_message = Message.decode(encoded_client_message)
         command = decoded_message.command
 
         self.protocols_lock.acquire()
-        protocol = self.protocols[client_port]
+        protocol = self.protocols[client_address[1]]
         self.protocols_lock.release()
 
         if decoded_message.flags == LIST.encoded:
-            print(f"Client {client_address}: enviando lista de archivos")
+            logging.debug(f"Client {client_address}: enviando lista de archivos")
             self.send_file_list(client_address)
         else:
-            print(f"Client {client_address}: iniciando download...")
+            logging.debug(f"Client {client_address}: iniciando download...")
             file_path = os.path.join(self.storage, decoded_message.file_name)
             if not os.path.exists(file_path):
-                print(f"File {decoded_message.file_name} doesn't exist")
-                send_error(transfer_socket, command, client_port,
+                logging.debug(f"File {decoded_message.file_name} doesn't exist")
+                send_error(transfer_socket, command, client_address[1],
                            ERROR_EXISTING_FILE)
                 logging.error(f"File {decoded_message.file_name} doesn't exist, try again")
                 return
-
             try:
-                print(f"Client {client_address}: enviando archivo {decoded_message.file_name}")
-                protocol.send_file(ip=client_address[0],client_port=client_port,
+                logging.debug(f"Client {client_address}: enviando archivo {decoded_message.file_name}")
+                logging.debug(f"llamado a protocol.send_file con {client_address}")
+                protocol.send_file(server_address=client_address,client_port=client_address[1],
                                    file_path=file_path)
                 self.close_client_connection(client_address)
             except TimeoutsRetriesExceeded:
                 logging.error("Timeouts retries exceeded")
                 self.close_client_connection(client_address)
-
-
-
 
     def send_file_list(self, client_address):
         files = os.listdir(self.storage)

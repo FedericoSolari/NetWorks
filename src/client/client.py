@@ -68,7 +68,7 @@ class Client:
         if address:
             self.socket.sendto(message, address) 
         else:
-            self.socket.sendto(message, (self.ip, self.port))
+            self.socket.sendto(message, (self.ip, self.port)) #entra siempre en el else
 
     def receive(self):
         return self.socket.recvfrom(BUFFER_SIZE)
