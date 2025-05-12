@@ -53,7 +53,7 @@ class StopAndWaitProtocol():
             try:
                 # print(f"[CLIENT] Intento #{tries + 1} enviando paquete seq={self.seq_num}")
                 if server_address:
-                    #Print(f" caso server_address: Enviando paquete seq={self.seq_num} a {server_address[0]}:{server_address[1]}")
+                    #print(f" caso server_address: Enviando paquete seq={self.seq_num} a {server_address[0]}:{server_address[1]}")
                     self.socket.sendto(msg.encode(), server_address)
                 else:
                     #print(f" Enviando paquete seq={self.seq_num} a {ip}:{port}")

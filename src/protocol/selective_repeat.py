@@ -39,6 +39,7 @@ class SelectiveRepeatProtocol:
         self.thread_pool = {}
         self.acks_received = 0
 
+    """
     def listen_for_acks(self, msg_queue, client_port, command, server_address):
         self.socket.settimeout(TIMEOUT)
         try:
@@ -79,6 +80,62 @@ class SelectiveRepeatProtocol:
             self.send_close_and_wait_for_response(
                 msg_queue, client_port, command, server_address
             )
+        """
+
+    def listen_for_acks(self, msg_queue, client_port, command, server_address):
+        """
+        Hilo que:
+        - recibe ACKs y libera espacio en la ventana
+        - tras cada TIMEOUT retransmite todos los paquetes pendientes
+        - solo termina cuando no quede NINGÚN paquete pendiente en self.sent_packets
+        """
+        self.socket.settimeout(TIMEOUT)
+        #print("[ACK-LISTENER] arrancando, pendientes iniciales =", len(self.sent_packets))
+
+        try:
+            # Mientras haya al menos un paquete pendiente de ACK:
+            while True:
+                with self.sent_packets_lock:
+                    if not self.sent_packets:
+                        break  # todos ACKed → salimos del bucle
+
+                try:
+                    data = self.socket.recvfrom(BUFFER_SIZE)[0]
+                    msg  = Message.decode(data)
+
+                    if msg.flags == ACK:
+                        seq = msg.ack_number
+                        with self.sent_packets_lock:
+                            if seq in self.sent_packets:
+                                # ACK nuevo: lo quitamos de pendientes
+                                #print(f"[ACK-LISTENER] nuevo ACK seq={seq}")
+                                self.sent_packets.pop(seq)
+                                # liberar espacio en ventana
+                                with self.not_acknowledged_lock:
+                                    self.not_acknowledged -= 1
+                                    self.window_not_full.notify_all()
+                            
+
+                except timeout:
+                    # TIMEOUT → retransmitimos **todos** los que sigan en sent_packets
+                    now = time.time()
+                    with self.sent_packets_lock:
+                        pendientes = list(self.sent_packets.keys())
+                    #print(f"[ACK-LISTENER] timeout, retransmitiendo: {pendientes}")
+                    with self.sent_packets_lock:
+                        for seq, (encoded, ts) in list(self.sent_packets.items()):
+                            if now - ts > TIMEOUT:
+                                target = server_address or (LOCAL_HOST, client_port)
+                                self.socket.sendto(encoded, target)
+                                # actualizar timestamp para no retransmitir inmediatamente otra vez
+                                self.sent_packets[seq] = (encoded, now)
+
+        finally:
+            #print("[ACK-LISTENER] todos los ACKs recibidos, cerrando sesión")
+            # Cierra limpiamente la sesión (envía CLOSE y espera CLOSE_ACK)
+            self.send_close_and_wait_for_response(msg_queue, client_port, command, server_address)
+
+
 
     def process_ack_and_cleanup_thread(self, client_port, message, server_address):
         ## recibo un mensaje y obtengo el ack number
@@ -99,7 +156,7 @@ class SelectiveRepeatProtocol:
         else:
             logging.debug(f"Messy ACK recibido: {ack_number}")
             self.buffer.append(message)
-
+    """
     def send_close_and_wait_for_response(self, msq_queue, client_port, command,server_address):
         close_tries = 0
         while close_tries < MAX_TIMEOUT_RETRIES:
@@ -115,6 +172,55 @@ class SelectiveRepeatProtocol:
                 break
             except (socket.timeout, Empty):
                 close_tries += 1
+    """
+    def send_close_and_wait_for_response(self, msg_queue, client_port, command, server_address):
+        """
+        Envía CLOSE solo cuando no queden paquetes pendientes.
+        Luego intenta leer CLOSE_ACK; si recv devuelve None (socket cerrado o timeout),
+        rompe el bucle y deja que el finally superior cierre el socket.
+        """
+        close_tries = 0
+        max_close_retries = 5
+        print("[CLOSE] iniciando send_close_and_wait_for_response")
+
+        while close_tries < max_close_retries:
+            print(f"[CLOSE] intento {close_tries+1}/{max_close_retries}")
+            # 1) Esperar a que todos los paquetes sean ACKed
+            if self.not_acknowledged > 0:
+                print(f"[CLOSE] aún pendientes={self.not_acknowledged}; durmiendo…")
+                time.sleep(0.1)
+                continue
+
+            # 2) Enviar CLOSE
+            if server_address:
+                self.socket.sendto(Message.close_session_msg(command), server_address)
+            else:
+                self.socket.sendto(
+                    Message.close_session_msg(command),
+                    (server_address[0], server_address[1])
+                )
+
+            # 3) Leer CLOSE_ACK (protegido con receive_from_queue_or_socket)
+            maybe_close_ack = receive_from_queue_or_socket(msg_queue, self.socket, TIMEOUT)
+            print(f"[CLOSE] tal vez llegó CLOSE_ACK: {maybe_close_ack!r}")
+            if not maybe_close_ack:
+                print("[CLOSE] no CLOSE_ACK (None) → terminando cierre.")
+                break
+
+            try:
+                if Message.decode(maybe_close_ack).flags == CLOSE_ACK.encoded:
+                    print("[CLOSE] recibí CLOSE_ACK válido")
+                    break
+            except Exception:
+                print("[CLOSE] IGNORO datos corruptos en CLOSE_ACK")
+            
+            close_tries += 1
+
+        # No cerramos el socket aquí: lo hará el finally de send_file o receive_file.
+
+
+
+
 
     def update_unacked_count(self, unack_packet_count):
         # se obtieene el lock para modificar la cantidad de paquetes no reconocidos
@@ -124,7 +230,7 @@ class SelectiveRepeatProtocol:
         if (unack_packet_count < 0 and self.not_acknowledged > 0) or unack_packet_count > 0:
             self.not_acknowledged += unack_packet_count
         self.not_acknowledged_lock.release()
-    
+
     # se encrga de cerrar correctamente el therad aosciado al ACK recibido
     def join_and_cleanup_ack_thread(self, msg_received):
         ack_num = msg_received.ack_number
@@ -188,23 +294,23 @@ class SelectiveRepeatProtocol:
                     except Exception as e:
                         logging.error("error al enviar mensaje devuelta al servidor ")
                     tries += 1
-    
+
     def receive(self, decoded_msg, port, file_controller, server_address=None):
         # logging.debug(f"Waiting for ack {self.rcv_base}")
         if decoded_msg.seq_number == self.rcv_base:
             self.process_expected_packet(decoded_msg, port, file_controller,
-                                         server_address=server_address)
+                                            server_address=server_address)
         elif self.packet_is_within_window(decoded_msg):
             self.buffer_packet(decoded_msg, port,
-                               server_address=server_address)
+                                server_address=server_address)
         elif self.already_acknowledged(decoded_msg):
             # client lost ack, send ack again
             self.send_duplicated_ack(decoded_msg, port,
-                                     server_address=server_address)
+                                        server_address=server_address)
         else:
             # otherwise it is not within the window and it is discarded
             logging.debug(f"Window starts at {self.rcv_base}"
-                          + f" & ends at {self.rcv_base + self.window_size-1}")
+                            + f" & ends at {self.rcv_base + self.window_size-1}")
             logging.debug(f"Msg out of window: {decoded_msg.seq_number}")
 
     def process_expected_packet(self, decoded_msg, port, file_controller, server_address=None):
@@ -236,7 +342,7 @@ class SelectiveRepeatProtocol:
         ack_num = self.rcv_base - 1
         if server_address:
             send_ack(decoded_msg.command, ack_num, self.socket,
-                     server_address[1], server_address[0])
+                        server_address[1], server_address[0])
         else:
             send_ack(decoded_msg.command, ack_num, self.socket, port)
 
@@ -272,13 +378,14 @@ class SelectiveRepeatProtocol:
         return decoded_msg.seq_number not in unique_sqns
 
     def process_buffer(self, file_controller):
+        print(f"[BUFFER] antes flush, pendientes: {[pkt.seq_number for pkt in self.buffer]}")
         if not self.buffer:
             return
 
-         #1) Ordeno
+            #1) Ordeno
         sorted_packets = sorted(self.buffer, key=lambda pkt: pkt.seq_number)
 
-         #2) Escribo consecutivos
+            #2) Escribo consecutivos
         expected_seq = self.rcv_base + 1
         pending = []
         for pkt in sorted_packets:
@@ -288,10 +395,11 @@ class SelectiveRepeatProtocol:
             else:
                 pending.append(pkt)
 
-         #3) Actualizo buffer y base de recepción
+            #3) Actualizo buffer y base de recepción
         self.buffer = pending
-         #En lugar de llamar a move_rcv_window, que suma otra vez a rcv_base
+            #En lugar de llamar a move_rcv_window, que suma otra vez a rcv_base
         self.rcv_base = expected_seq
+        print(f"[BUFFER] después flush, nuevos rcv_base={self.rcv_base}, buffer left={[pkt.seq_number for pkt in self.buffer]}")
 
     def write_to_file(self, file_controller, packet):
         logging.debug(f"Writing to file sqn: {packet.seq_number}")
@@ -320,6 +428,7 @@ class SelectiveRepeatProtocol:
             )
             encoded = message.encode()
             target = server_address or (LOCAL_HOST, port)
+            
             self.socket.sendto(encoded, target)
 
             # 3) Registrar para reenvíos por timeout
@@ -332,7 +441,7 @@ class SelectiveRepeatProtocol:
 
     def window_is_not_full(self):
         return self.not_acknowledged < self.window_size
-    
+
     def spawn_packet_ack_thread(self, client_port, message, server_address):
         ack_queue = Queue()
         seq_number = message.seq_number
@@ -350,14 +459,9 @@ class SelectiveRepeatProtocol:
         self.not_acknowledged_lock.acquire()
         self.not_acknowledged += 1
         self.not_acknowledged_lock.release()
-
+    """
     def send_file(self, args=None, message_queue=None, client_port=LOCAL_PORT, file_path=None, server_address=None):
-        """
-        Envía un archivo usando Selective Repeat:
-        - Si file_path está definido, es un DOWNLOAD (servidor → cliente).
-        - Si no, se extrae src/name de args para un UPLOAD (cliente → servidor).
-        - message_queue se usa para coordinar el cierre de sesión.
-        """
+        
         # 1) Inicializar FileController y determinar el comando
         if file_path:
             file_controller = FileController.from_file_name(file_path, READ_MODE)
@@ -399,6 +503,49 @@ class SelectiveRepeatProtocol:
                 logging.debug("SelectiveRepeatProtocol: transfer socket closed")
             except Exception:
                 pass
+    """
+    def send_file(self, args=None, message_queue=None, client_port=LOCAL_PORT, file_path=None, server_address=None):
+        if file_path:
+            file_controller = FileController.from_file_name(file_path, READ_MODE)
+            command = Command.DOWNLOAD
+        else:
+            file_controller = FileController.from_args(args.src, args.name, READ_MODE)
+            command = Command.UPLOAD
+
+        try:
+            file_size = file_controller.get_file_size()
+            total_packets = int(file_size / DATA_SIZE) + (1 if file_size % DATA_SIZE else 0)
+            self.set_window_size(total_packets)
+
+            data = file_controller.read()
+
+            # 1) Levantar hilo de ACK
+            ack_thread = Thread(
+                target=self.listen_for_acks,
+                args=(message_queue, client_port, command, server_address)
+            )
+            ack_thread.start()
+
+            # 2) Enviar todos los paquetes
+            while data:
+                self.send(command, client_port, data, file_controller, server_address)
+                data = file_controller.read()
+
+            # 3) Esperar a que todos los paquetes sean reconocidos
+            while self.not_acknowledged > 0:
+                time.sleep(0.1)  # Espera breve para permitir ACKs
+
+            # 4) Unir hilo de ACK para asegurar que finalice
+            ack_thread.join(timeout=5)
+
+        finally:
+            file_controller.close()
+            try:
+                self.socket.close()
+                logging.debug("SelectiveRepeatProtocol: transfer socket closed")
+            except Exception:
+                pass
+
 
     def move_rcv_window(self, shift):
         self.rcv_base += min(shift, WINDOW_RECEIVER_SIZE)
@@ -426,22 +573,25 @@ class SelectiveRepeatProtocol:
     def calculate_window_size(self, number_of_packets):
         return min(int(number_of_packets / 2), MAX_WINDOW_SIZE) 
 
+
     def receive_file(self, first_encoded_msg, file_path,
-                     client_port=LOCAL_PORT, server_address=None):
+                    client_port=LOCAL_PORT, server_address=None):
         """
-        Recibe un archivo con Selective Repeat:
-        - Ignora handshake hasta el primer paquete de datos.
-        - Procesa todos los paquetes hasta CLOSE.
-        - Si se superan los timeouts, cierra sin excepción.
+        - Ignora handshake hasta el primer data.
+        - Recibe y procesa todos los paquetes normales hasta CLOSE.
+        - Tras CLOSE, abre un “grace period” de un TIMEOUT extra para datos in-flight.
+        - Hace flush final del buffer out-of-order y envía CLOSE_ACK.
         """
         fc = FileController.from_file_name(file_path, WRITE_MODE)
         self.socket.settimeout(TIMEOUT)
+        #print("[RECEIVER] iniciar receive_file")
 
         try:
-            # 1) Ignorar todo hasta el primer data (flags == NO_FLAGS)
+            # 1) Ignorar handshake hasta primer paquete con NO_FLAGS
             enc = first_encoded_msg
             msg = Message.decode(enc)
             while msg.flags != NO_FLAGS:
+                #print(f"[RECEIVER] ignorando flags={msg.flags}")
                 if msg.flags == CLOSE:
                     return
                 try:
@@ -450,31 +600,42 @@ class SelectiveRepeatProtocol:
                 except socket.timeout:
                     continue
 
-            # 2) Bucle principal: recibir, procesar y leer siguiente
-            retries = 0
+            # 2) Bucle principal de datos
             while msg.flags != CLOSE:
+                #Print(f"[RECEIVER] data seq={msg.seq_number}")
                 try:
                     self.receive(msg, client_port, fc, server_address=server_address)
                     enc = self.socket.recvfrom(BUFFER_SIZE)[0]
                     msg = Message.decode(enc)
-                    retries = 0
                 except socket.timeout:
-                    retries += 1
-                    if retries >= MAX_TIMEOUT_RETRIES:
-                        raise TimeoutsRetriesExceeded()
-                    # si no, vuelvo a esperar
                     continue
 
-            # 3) Al recibir CLOSE: vaciar buffer y enviar CLOSE_ACK
-            self.process_buffer(fc)  # si aún queda algo pendiente
+            # 3) Grace period tras CLOSE: damos un TIMEOUT extra
+            #print("[RECEIVER] recibí CLOSE, iniciando grace period")
+            end_wait = time.time() + TIMEOUT
+            while time.time() < end_wait:
+                try:
+                    #print("[RECEIVER] grace period, esperando más data…")
+                    enc = self.socket.recvfrom(BUFFER_SIZE)[0]
+                    msg = Message.decode(enc)
+                    if msg.flags == NO_FLAGS:
+                        #print(f"[RECEIVER] grace period: llegada tardía seq={msg.seq_number}")
+                        self.receive(msg, client_port, fc, server_address=server_address)
+                except socket.timeout:
+                    break
+
+            # 4) Flush final del buffer out-of-order
+            self.process_buffer(fc)
+
+            # 5) Enviar CLOSE_ACK final
             target = server_address or (LOCAL_HOST, client_port)
+            #print("[RECEIVER] enviando CLOSE_ACK final")
             self.socket.sendto(Message.close_ack_msg(msg.command), target)
 
         except TimeoutsRetriesExceeded:
             logging.info("SelectiveRepeat: timeouts excedidos recibiendo, cerrando sesión limpia")
 
         finally:
-            # siempre cierro archivo y socket
             fc.close()
             try:
                 self.socket.close()
