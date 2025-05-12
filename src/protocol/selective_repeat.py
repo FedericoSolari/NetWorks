@@ -571,7 +571,7 @@ class SelectiveRepeatProtocol:
         logging.debug(f"Window size: {self.window_size}")
 
     def calculate_window_size(self, number_of_packets):
-        return min(int(number_of_packets / 2), MAX_WINDOW_SIZE) 
+        return min(number_of_packets, MAX_WINDOW_SIZE)
 
 
     def receive_file(self, first_encoded_msg, file_path,
