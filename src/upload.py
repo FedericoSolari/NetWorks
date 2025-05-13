@@ -17,27 +17,24 @@ def upload(client):
         print(f"File transfer duration: {duration:.2f} seconds")
 
     except KeyboardInterrupt:
-        print("\nExiting...")
+        logging.debug("\nExiting...")
         client.protocol.socket.sendto(Message.close_ack_msg(Command.UPLOAD), client.client_address)
         sys.exit(0)
 
-
 if __name__ == "__main__":
     try:
-        print("Starting upload client...")
+        logging.debug("Starting upload client...")
         args = parse_args_upload()
-
         logging.basicConfig(level=LOG_LEVEL) 
 
-        print(args)
+        logging.debug(args)
 
         client = Client(args.host, args.port, args.RDTprotocol)
-        #client.socket.settimeout(args.timeout)
         client.start(Command.UPLOAD, lambda: upload(client))
-        print("Client started successfully.")
+        logging.debug("Client started successfully.")
     except KeyboardInterrupt:
-        print("\nExiting...")
+        logging.debug("\nExiting...")
         sys.exit(0)
     except Exception as e:
-        print(f"An error occurred. Server is not available. {e}")
+        logging.debug(f"An error occurred. Server is not available. {e}")
         sys.exit(1)

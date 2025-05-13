@@ -23,8 +23,6 @@ class Server:
             self.port = port
         else:
             self.port = args.port
-        #self.ip = ip
-        #self.port = port
         self.clients = {}
         self.protocols = {}
         self.protocols_lock = Lock()
@@ -53,7 +51,7 @@ class Server:
                 client_msg_queue = self.clients[client_port]
                 client_msg_queue.put(encoded_message)
 
-            except KeyError:  # el cliente no esta en clientes
+            except KeyError: 
                 client_msg_queue = Queue()
                 client_msg_queue.put(encoded_message)
                 self.clients[client_port] = client_msg_queue
@@ -78,18 +76,15 @@ class Server:
         with self.protocols_lock:
             self.protocols[client_port] = protocol
 
-        # Información de debug
-        print("envio start session ack")
-        print(f" en el server :flecha_en_curva_a_la_derecha: Destino: IP={client_address[0]}, Port={client_address[1]}")
-        print(f" en el server :flecha_en_curva_a_la_derecha: Socket fileno: {transfer_socket.fileno()}")
-        print(f" en el servidor + {transfer_socket.getsockname()}")
+        logging.debug("envio start session ack")
+        logging.debug(f" en el server :flecha_en_curva_a_la_derecha: Destino: IP={client_address[0]}, Port={client_address[1]}")
+        logging.debug(f" en el server :flecha_en_curva_a_la_derecha: Socket fileno: {transfer_socket.fileno()}")
+        logging.debug(f" en el servidor + {transfer_socket.getsockname()}")
 
         start_session_ack = Message.start_session_ack_msg(decoded_msg.command)
 
-        # 1) Bucle de reintentos para enviar START_SESSION_ACK y esperar el ACK del cliente
         tries = 0
         while tries < MAX_TIMEOUT_RETRIES:
-            # Enviamos el ACK de sesión
             transfer_socket.sendto(start_session_ack, client_address)
 
             try:
@@ -98,9 +93,8 @@ class Server:
                 resp = Message.decode(data)
 
                 if resp.flags == ACK:
-                    # Handshake completado: arrancamos la transferencia
                     self.start_file_transfer_operation(msg_queue, resp, client_address, transfer_socket)
-                    print("fin operacion de file transfer")
+                    logging.info("fin operacion de file transfer")
                     return
                 else:
                     logging.warning(f"Handshake: recibí flag inesperado {resp.flags!r}, reintentando…")
@@ -109,7 +103,6 @@ class Server:
                 logging.warning(f"Handshake SR: timeout esperando ACK ({tries}/{MAX_TIMEOUT_RETRIES}), reenviando START_SESSION_ACK")
                 continue
 
-        # 2) Si agotamos los reintentos sin recibir ACK, cerramos la conexión
         logging.error(f"Handshake SR: no recibí ACK de sesión tras {MAX_TIMEOUT_RETRIES} intentos, cerrando conexión con {client_address}")
         self.close_client_connection(client_address)
 
@@ -137,31 +130,31 @@ class Server:
         protocol = self.protocols[client_port]
         self.protocols_lock.release()
         msg = transfer_socket.recvfrom(BUFFER_SIZE)[0]
-        print(f"Primer mensaje recibido en upload: {Message.decode(msg)}")
+        logging.debug(f"Primer mensaje recibido en upload: {Message.decode(msg)}")
         file_name = get_file_name(self.storage, Message.decode(msg).file_name)
-        print(f"Uploading file to: {file_name}")
+        logging.debug(f"Uploading file to: {file_name}")
         try:
             protocol.receive_file(first_encoded_msg=msg,
                       client_port=client_port,
                       file_path=file_name,
                       server_address=client_address)
 
-            print(f"File {file_name} uploaded, closing connection")
+            logging.debug(f"File {file_name} uploaded, closing connection")
         except timeout:
             logging.error("Timeout on client")
             self.close_client_connection(client_address)
 
     def start_file_transfer_operation(self, client_msg_queue, decoded_msg, client_address, transfer_socket):
         client_port = client_address[1]
-        print(f"Client {client_port}: iniciando la transferencia de archivos...")
+        logging.debug(f"Client {client_port}: iniciando la transferencia de archivos...")
         self.clients[client_port] = client_msg_queue
         if decoded_msg.command == Command.DOWNLOAD:
-            print(f"Client {client_port}: iniciando download...")
+            logging.debug(f"Client {client_port}: iniciando download...")
             self.handle_download(client_address, client_msg_queue,transfer_socket)
         elif decoded_msg.command == Command.UPLOAD:
-            print(f"Client {client_port}: iniciando la transferencia de archivos...")   
+            logging.debug(f"Client {client_port}: iniciando la transferencia de archivos...")   
             self.handle_upload(client_address, client_msg_queue,transfer_socket)
-            print(f"Client {client_port}: transferencia de archivos finalizada")
+            logging.debug(f"Client {client_port}: transferencia de archivos finalizada")
         else:
             logging.error(f"Client {client_port}: comando no soportado")
             self.close_client_connection(client_port)
@@ -201,17 +194,17 @@ class Server:
 
     def send_file_list(self, client_address):
         files = os.listdir(self.storage)
-        print("Server available files:")
-        print(files)
+        logging.debug("Server available files:")
+        logging.debug(files)
         self.close_client_connection(client_address)
            
     
     def close_client_connection(self, client_address):
         self.clients.pop(client_address[1], None)
-        print(f"Client {client_address}:")
+        logging.debug(f"Client {client_address}:")
         self.protocols_lock.acquire()
         self.protocols.pop(client_address[1], None)
         self.protocols_lock.release()
         
-        print(f"Client {client_address[1]}: cerrando la conexion con el cliente...")
+        logging.debug(f"Client {client_address[1]}: cerrando la conexion con el cliente...")
 

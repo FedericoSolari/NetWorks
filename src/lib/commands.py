@@ -1,6 +1,5 @@
 from enum import Enum
 
-
 class Command(Enum):
     DOWNLOAD = 1
     UPLOAD = 2

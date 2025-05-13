@@ -16,26 +16,24 @@ class Client:
     def start(self, command, action):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.settimeout(TIMEOUT)
-        print("seteo skt")
-        print("seteo skt timeout")
         self.protocol = self.protocol(self.socket)
-        print("seteo protocol")
+        logging.info("Seteo protocolo")
 
         start_session_tries = 0
         while start_session_tries < MAX_TIMEOUT_RETRIES:
             try:
-                print("envio mensaje de start session") 
+                logging.info("envio mensaje de start session") 
                 self.send_start_to_server(command, self.protocol)
                 self.send_start_to_server(command, self.protocol)
                 self.send_start_to_server(command, self.protocol)
-                print("espero recibir msj")
+                logging.info("Espero a recibir msj")
                 
                 enconded_message, server_address = self.socket.recvfrom(BUFFER_SIZE)
-                print("recibi msj")
+                logging.info("Recibi msj")
 
                 self.server_address = server_address
                 maybe_start_session_ack = Message.decode(enconded_message) 
-                print("ACK exitoso con servidor")
+                logging.info("ACK exitoso con servidor")
                 break
 
             except ValueError as e:
@@ -52,23 +50,20 @@ class Client:
             
         if maybe_start_session_ack.flags == START_SESSION_ACK:  
             self.send(Message.ack_msg(command, ack_num=0), self.server_address)
-            # self.send(Message.ack_msg(command, ack_num=0), self.server_address)
-            # self.send(Message.ack_msg(command, ack_num=0), self.server_address)
-
-            print("Conectado al servidor")
+            logging.info("Conectado al servidor")
             action()
  
     def send_start_to_server(self, command, protocol):
-        print("Enviando mensaje de inicio de sesion al servidor")
+        logging.info("Enviando mensaje de inicio de sesion al servidor")
         start_session_msg = Message.start_session_msg(command, protocol)
         self.send(start_session_msg)
-        print("Sent START SESSION to server")
+        logging.info("Sent START SESSION to server")
 
     def send(self, message, address=None):
         if address:
             self.socket.sendto(message, address) 
         else:
-            self.socket.sendto(message, (self.ip, self.port)) #entra siempre en el else
+            self.socket.sendto(message, (self.ip, self.port))
 
     def receive(self):
         return self.socket.recvfrom(BUFFER_SIZE)

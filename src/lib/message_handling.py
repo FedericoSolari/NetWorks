@@ -4,7 +4,6 @@ from lib.flags import START_SESSION, ACK, CLOSE, CLOSE_ACK, ERROR, LIST, START_S
 from lib.constants import LOCAL_HOST
 from lib.commands import Command
 
-
 def add_padding(data: bytes, n: int):
     k = n - len(data)
     if k < 0:
@@ -61,8 +60,6 @@ class Message:
 
         bytes_arr += self.seq_number.to_bytes(4, signed=False, byteorder='big')
         bytes_arr += self.ack_number.to_bytes(4, signed=False, byteorder='big')
-
-        # append data from position 1024 to 2048
         bytes_arr += add_padding(self.data, BUFFER_SIZE - len(bytes_arr))
 
         return bytes_arr

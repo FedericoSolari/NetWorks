@@ -7,7 +7,6 @@ DO_NOT_MODIFY_MTU = -1
 DEFAULT_GATEWAY_CLIENTS_SIDE = "10.0.1.254"
 DEFAULT_GATEWAY_SERVER_SIDE = "10.0.0.254"
 
-
 class Router(Node):
     def config(self, **params):
         super(Router, self).config(**params)
@@ -85,7 +84,6 @@ class LinearEndsTopo(Topo):
                 cls=Host,
             )
             self.addLink(host_client_i, s3)
-
 
 topos = {
     "linends": (

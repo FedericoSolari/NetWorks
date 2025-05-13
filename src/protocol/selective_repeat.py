@@ -25,7 +25,7 @@ class SelectiveRepeatProtocol:
         self.send_base = 0
         self.next_seq_num = 0
         self.send_window_size = WINDOW_RECEIVER_SIZE
-        self.sent_packets = {}            # seq_num -> (encoded_msg, timestamp)
+        self.sent_packets = {}           
         self.sent_packets_lock = Lock()
         self.unacked_count = 0
         self.unacked_lock = Lock()
@@ -38,9 +38,7 @@ class SelectiveRepeatProtocol:
         self.rcv_buffer = []
 
     def listen_for_acks(self, command: Command, client_port: int, server_address=None):
-        """
-        Hilo emisor: recibe ACKs y retransmite selectivamente.
-        """
+
         self.socket.settimeout(TIMEOUT)
         try:
             while True:
@@ -98,9 +96,6 @@ class SelectiveRepeatProtocol:
         logging.warning("No CLOSE_ACK recibido tras varios intentos")
 
     def send(self, command, port, data: bytes, file_controller, server_address=None):
-        """
-        Envía un paquete respetando ventana.
-        """
         with self.window_not_full:
             while self.unacked_count >= self.send_window_size:
                 self.window_not_full.wait()
@@ -118,7 +113,6 @@ class SelectiveRepeatProtocol:
 
     def send_file(self, args=None, message_queue=None,
                   client_port=LOCAL_PORT, file_path=None, server_address=None):
-        # Inicializar FileController y comando
         if file_path:
             fc = FileController.from_file_name(file_path, READ_MODE)
             command = Command.DOWNLOAD
@@ -195,24 +189,19 @@ class SelectiveRepeatProtocol:
 
     def receive_file(self, first_encoded_msg, file_path,
                      client_port=LOCAL_PORT, server_address=None):
-        """
-        Recibe un archivo completo.
-        El parámetro file_path debe incluir carpeta y nombre final deseado.
-        """
-        # Asegurar directorio destino
         dest = os.path.dirname(file_path)
         if dest:
             os.makedirs(dest, exist_ok=True)
         output_path = file_path
-        # Preparar archivo para escritura
+
         fc = FileController.from_file_name(output_path, WRITE_MODE)
         self.socket.settimeout(TIMEOUT)
         try:
-            # Recibir handshake o primer data
+            # Recibimos handshake o primer data
             if first_encoded_msg:
                 raw, addr = first_encoded_msg if isinstance(first_encoded_msg, tuple) else (first_encoded_msg, None)
                 msg0 = Message.decode(raw)
-                # Si viene ACK de inicio (servidor en download), ignorar y recibir primer data
+                # Si viene ACK de inicio (servidor en download), ignoramos y recibir primer data
                 if msg0.flags in (START_SESSION_ACK, START_SESSION):
                     logging.debug("Handshake recibido, esperando primer paquete de datos...")
                     raw, addr = self.socket.recvfrom(BUFFER_SIZE)
@@ -225,7 +214,6 @@ class SelectiveRepeatProtocol:
                 if msg.flags == NO_FLAGS:
                     self.receive(msg, client_port, fc, server_address or addr)
                 elif msg.flags == CLOSE:
-                    # Enviar ACK de cierre
                     ack = Message.close_ack_msg(msg.command)
                     tgt = server_address or addr or (LOCAL_HOST, client_port)
                     self.socket.sendto(ack, tgt)

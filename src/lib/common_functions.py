@@ -16,15 +16,11 @@ def get_file_name(directory, file_name):
     return candidate
 
 def send_error(socket, command, port, error_msg):
-    # Envia un mensaje de error 
     encoded_msg = Message.error_msg(command, error_msg)
     socket.sendto(encoded_msg, (LOCAL_HOST, port))
 
 def receive_from_queue_or_socket(queue, sock, timeout=None):
-    """
-    Recibe un mensaje desde una cola (modo servidor) o desde el socket (modo cliente).
-    Protege la lectura del socket para no explotar con Errno 9 si ya está cerrado.
-    """
+    
     if queue:
         # En modo servidor recibimos desde la cola
         return queue.get(block=True, timeout=timeout)
@@ -34,16 +30,10 @@ def receive_from_queue_or_socket(queue, sock, timeout=None):
         message, _ = sock.recvfrom(BUFFER_SIZE)
         return message
     except (OSError, ValueError) as e:
-        # Puede ser Errno 9 u otro error si el socket ya cerró
         logging.debug(f"receive_from_queue_or_socket: socket cerrado o error {e}")
         return None
 
-
-
-
 def send_udp_ack(command, ack_number, destination_addr, sock):
-    # Envía un mensaje ACK por socket UDP.
-
     try:
         ack_msg = Message.ack_msg(command, ack_number)
         sock.sendto(ack_msg, destination_addr)

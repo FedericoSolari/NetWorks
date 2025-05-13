@@ -3,7 +3,6 @@ import os
 from lib.constants import DATA_SIZE
 from lib.exceptions import FileOpenException, FileReadingError
 
-
 class FileController():
     @classmethod
     def from_file_name(self, file_name, mode):
@@ -13,7 +12,7 @@ class FileController():
         try:
             file_controller.file = open(self.src, mode)
         except Exception as e:
-            print(f'Error opening file {self.src}, error: {e}')
+            logging.error(f'Error opening file {self.src}, error: {e}')
             raise FileOpenException
         return file_controller
 
@@ -25,7 +24,7 @@ class FileController():
         try:
             file_controller.file = open(self.src, mode)
         except Exception as e:
-            print(f'Error opening file {self.src}, error: {e}')
+            logging.error(f'Error opening file {self.src}, error: {e}')
             raise FileOpenException
         return file_controller
 
@@ -34,7 +33,7 @@ class FileController():
             data = self.file.read(DATA_SIZE)
             return data
         except Exception as e:
-            print(f'Error reading file: {e}')
+            logging.error(f'Error reading file: {e}')
             raise FileReadingError
 
     def write_file(self, text):

@@ -13,10 +13,9 @@ from lib.common_functions import get_file_name
 from time import sleep
 import time
 
-
 def download(client, args):
     if args.files:
-        print("Server will show files...")
+        logging.debug("Server will show files...")
         show_server_files(client)
         sys.exit(0)
 
@@ -32,13 +31,11 @@ def download(client, args):
         logging.error(f"An error occurred: {e}")
         sys.exit(1)
 
-
 def show_server_files(client):
     msg_to_send = Message(Command.DOWNLOAD, LIST, 0, "", b"")
     client.send(msg_to_send.encode()) #sin address
     msg_to_send = Message(Command.DOWNLOAD, LIST, 0, "", b"")
     client.send(msg_to_send.encode(), client.server_address)
-
 
 def download_using_protocol(client, args):
     msg_to_send = Message.download_msg(args.name)
@@ -51,7 +48,7 @@ def download_using_protocol(client, args):
 
     decoded_msg = Message.decode(encoded_messge)
     if decoded_msg.flags == ERROR.encoded:
-        print(decoded_msg.data)
+        logging.debug(decoded_msg.data)
         sys.exit(1)
 
     file_name = get_file_name(DOWNLOADS_DIR, args.dst)
@@ -61,11 +58,10 @@ def download_using_protocol(client, args):
                                  server_address=client.server_address)
     end_time = time.time()
     duration = end_time - start_time
-    print(f"Duración de la descarga: {duration:.2f} segundos")
-    print("Download finished")
+    logging.debug(f"Duración de la descarga: {duration:.2f} segundos")
+    logging.debug("Download finished")
 
 def send_with_retries(client, message, retries=MAX_TIMEOUT_RETRIES):
-    # intento enviar un mensaje y recibir una respuesta, con reintentos ante Timeouts
     for attemp in range(retries):
         try:
             print(f"Attempt {attemp + 1} to send message a: {client.server_address}...")
@@ -80,15 +76,11 @@ if __name__ == "__main__":
     try:
         sleep(2)
         args = parse_args_download()
-
         logging.basicConfig(level=LOG_LEVEL)
-
-        #prepare a logging
         client = Client(args.host, args.port, args.RDTprotocol)
         client.start(Command.DOWNLOAD, lambda: download(client, args))
     except KeyboardInterrupt:
-        print("\nExiting...")
-        #action to send close message after download
+        logging.debug("\nExiting...")
         client.socket.send_to(Message.close_msg(Command.DOWNLOAD), (args.host, args.port))
         sys.exit(0)
     except Exception as e:
