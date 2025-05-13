@@ -2,6 +2,7 @@ import os
 from lib.message_handling import Message
 from lib.constants import LOCAL_HOST
 from lib.constants import BUFFER_SIZE
+import logging
 
 def get_file_name(directory, file_name):
     base_name, extension = os.path.splitext(file_name)
