@@ -39,4 +39,4 @@ MAX_ACK_RESEND_TRIES = 10
 
 WRITE_MODE = "wb"
 
-LOG_LEVEL = logging.ERROR
+LOG_LEVEL = logging.DEBUG

@@ -2,6 +2,7 @@ import os
 from lib.message_handling import Message
 from lib.constants import LOCAL_HOST
 from lib.constants import BUFFER_SIZE
+import logging
 
 def get_file_name(directory, file_name):
     base_name, extension = os.path.splitext(file_name)
@@ -36,9 +37,6 @@ def receive_from_queue_or_socket(queue, sock, timeout=None):
         # Puede ser Errno 9 u otro error si el socket ya cerró
         logging.debug(f"receive_from_queue_or_socket: socket cerrado o error {e}")
         return None
-
-
-
 
 def send_udp_ack(command, ack_number, destination_addr, sock):
     # Envía un mensaje ACK por socket UDP.
