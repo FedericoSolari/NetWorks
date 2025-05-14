@@ -58,8 +58,7 @@ def download_using_protocol(client, args):
                                  server_address=client.server_address)
     end_time = time.time()
     duration = end_time - start_time
-    logging.debug(f"Duración de la descarga: {duration:.2f} segundos")
-    logging.debug("Download finished")
+    print(f"Download finished. Duración de la descarga: {duration:.2f} segundos")
 
 def send_with_retries(client, message, retries=MAX_TIMEOUT_RETRIES):
     for attemp in range(retries):
