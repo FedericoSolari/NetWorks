@@ -41,7 +41,7 @@ class Client:
             except TypeError as e:
                 logging.error(f"Error de type error: {e}")
             except socket.timeout:
-                logging.error("Timeout esperando al servidor START SESSION " +
+                logging.debug("Timeout esperando al servidor START SESSION " +
                               "respuesta. Intentando nuevamente...")
                 start_session_tries += 1
 

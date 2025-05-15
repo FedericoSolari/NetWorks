@@ -38,7 +38,6 @@ class SelectiveRepeatProtocol:
         self.rcv_buffer = []
 
     def listen_for_acks(self, command: Command, client_port: int, server_address=None):
-
         self.socket.settimeout(TIMEOUT)
         try:
             while True:
@@ -93,7 +92,7 @@ class SelectiveRepeatProtocol:
                 except:
                     pass
             tries += 1
-        logging.warning("No CLOSE_ACK recibido tras varios intentos")
+        logging.debug("No CLOSE_ACK recibido tras varios intentos")
 
     def send(self, command, port, data: bytes, file_controller, server_address=None):
         with self.window_not_full:
